@@ -1,0 +1,15 @@
+# Gradio UI
+gradio>=3.53
+
+# Stable Diffusion WebUI callback 模組，非官方套件，需 WebUI 環境
+# modules 是 WebUI 自帶模組，無需 pip 安裝
+# 這裡列註解提醒
+# modules
+
+# Python 標準庫（不需要 pip 安裝）
+# socket
+# threading
+# time
+# subprocess
+# os
+# platform
