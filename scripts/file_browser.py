@@ -1,29 +1,30 @@
-import os
 import gradio as gr
 from modules import script_callbacks
 
-def list_files():
-    """遍歷當前插件目錄並回傳檔案清單"""
-    base_dir = os.path.dirname(os.path.abspath(__file__))
-    files = []
-    for root, _, filenames in os.walk(base_dir):
-        for f in filenames:
-            rel_path = os.path.relpath(os.path.join(root, f), base_dir)
-            files.append(rel_path)
-    return "\n".join(files) if files else "（無檔案）"
+def connect(ip, port, connected):
+    if connected:
+        return f"❌ 已斷開 {ip}:{port}", False, "建立遠程連接"
+    else:
+        return f"✅ 已連接到 {ip}:{port}", True, "斷開連接"
 
 def on_ui_tabs():
     with gr.Blocks() as demo:
-        gr.Markdown("### 📂 File Browser - 當前插件檔案清單")
-        output = gr.Textbox(label="檔案清單", lines=20)
-        refresh_btn = gr.Button("🔄 重新整理")
+        gr.Markdown("## 🌐 遠程連接擴展 (範例UI)")
 
-        refresh_btn.click(fn=list_files, inputs=[], outputs=[output])
+        with gr.Row():
+            ip = gr.Textbox(label="IP地址", value="192.168.1.104")
+            port = gr.Textbox(label="端口", value="7887")
 
-        # 預設載入一次
-        demo.load(fn=list_files, inputs=[], outputs=[output])
+        status = gr.Textbox(label="狀態", value="未連接")
+        btn = gr.Button("建立遠程連接")
+        connected_state = gr.State(False)
 
-    return [(demo, "File Browser", "file_browser_tab")]
+        btn.click(
+            fn=connect,
+            inputs=[ip, port, connected_state],
+            outputs=[status, connected_state, btn]
+        )
 
-# 註冊 UI 分頁
+    return [(demo, "遠程連接", "remote_connect_tab")]
+
 script_callbacks.on_ui_tabs(on_ui_tabs)
